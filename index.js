@@ -5,8 +5,9 @@ const { google } = require('googleapis');
 const app = express();
 app.use(express.json());
 
-const SEATALK_APP_ID = process.env.SEATALK_APP_ID;
-const SEATALK_APP_SECRET = process.env.SEATALK_APP_SECRET;
+// CREDENCIAIS DIRETO NO CÓDIGO
+const SEATALK_APP_ID = 'ODU8NjUyODQ4NzE1';
+const SEATALK_APP_SECRET = 'lOt0nyf8fQek0P0LkeTkomA3IYYkiLNe';
 const SPREADSHEET_ID = '1MMyWOPR6JxAxdo39g7OLawQV72WKXqo0KK6xftdmDuc';
 const SHEET_NAME = 'base_RR';
 
@@ -61,26 +62,35 @@ async function buscarCasoPorProtocolo(protocolo) {
   return null;
 }
 
-// ROTA DO WEBHOOK COM SUPORTE AO DESAFIO DE VERIFICAÇÃO DO SEATALK
+// ROTA DO WEBHOOK
 app.all('/seatalk-webhook', async (req, res) => {
   try {
     const body = req.body || {};
     const query = req.query || {};
-    const challenge = body.seatalk_challenge || (body.event && body.event.seatalk_challenge) || query.seatalk_challenge;
 
+    // Suporte ao Desafio / Validação do SeaTalk
+    const challenge = body.seatalk_challenge || (body.event && body.event.seatalk_challenge) || query.seatalk_challenge;
     if (challenge || body.event_type === 'event_verification') {
       return res.status(200).json({ seatalk_challenge: challenge });
     }
 
-    if (body.event_type === 'message_from_bot_subscriber_in_group_chat') {
-      const messageText = body.event.message.text.content;
+    // EVENTO CORRETO DE MENSAGEM COM MENÇÃO NO SEATALK
+    if (
+      body.event_type === 'new_mentioned_message_received_from_group_chat' ||
+      body.event_type === 'message_from_bot_subscriber_in_group_chat'
+    ) {
+      const messageText = body.event.message.text.content || '';
       const groupId = body.event.message.group_id;
       const messageId = body.event.message.message_id;
       const senderSeatalkId = body.event.message.sender_seatalk_id;
+
+      // Extrai protocolo no formato xxxxx/xxxx
       const matchProtocolo = messageText.match(/\b\d+\/\d+\b/);
 
       if (matchProtocolo) {
         const protocolo = matchProtocolo[0];
+        console.log(`Protocolo encontrado: ${protocolo}`);
+        
         const dadosCaso = await buscarCasoPorProtocolo(protocolo);
         if (dadosCaso) {
           const solicitacaoText = dadosCaso['Solicitação a empresa'] || '';
@@ -90,6 +100,7 @@ app.all('/seatalk-webhook', async (req, res) => {
             dadosCaso['refund_amount'],
             dadosCaso['return_refund_paid_datetime']
           );
+          
           const respostaFormatada = 
 `• Protocolo: ${dadosCaso['Protocolo']}
 • Número do Pedido: ${dadosCaso['order_sn']}
@@ -108,15 +119,18 @@ app.all('/seatalk-webhook', async (req, res) => {
             },
             { headers: { Authorization: `Bearer ${token}` } }
           );
+          console.log('Resposta enviada com sucesso para o SeaTalk!');
+        } else {
+          console.log(`Protocolo ${protocolo} não foi encontrado na planilha.`);
         }
       }
     }
     return res.status(200).send('OK');
   } catch (error) {
-    console.error('Erro:', error);
+    console.error('Erro no processamento do webhook:', error);
     return res.status(500).send('Error');
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, '0.0.0.0', () => console.log(`Servidor rodando na porta ${PORT}`));
