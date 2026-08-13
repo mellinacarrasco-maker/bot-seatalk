@@ -5,8 +5,8 @@ const { google } = require('googleapis');
 const app = express();
 app.use(express.json());
 
-// Credenciais e URLs da API do SeaTalk
-const SEATALK_APP_ID = 'ODU8NjUyODQ4NzE1';
+// Credenciais da API do SeaTalk (CORRIGIDAS)
+const SEATALK_APP_ID = 'ODU4NjUyODQ4NzE1';
 const SEATALK_APP_SECRET = 'lOt0nyf8fQek0P0LkeTkomA3IYYkiLNe';
 const AUTH_URL = 'https://openapi.seatalk.io/auth/app_access_token';
 const PRIVATE_MSG_URL = 'https://openapi.seatalk.io/messaging/v2/single_chat';
@@ -92,8 +92,7 @@ app.all('/seatalk-webhook', async (req, res) => {
     const messageObj = eventData.message || {};
     const messageText = (messageObj.text && messageObj.text.content) ? messageObj.text.content.trim() : '';
 
-    // Regex Misto: captura códigos numéricos longos, mistos com letras, hífen (-) ou barra (/)
-    // Ex: 20260800015860670, 12345/2024, ABC-12345, etc.
+    // Aceita qualquer formato de protocolo (numeros longos, com barra /, com hífen -, etc)
     const matchProtocolo = messageText.match(/[a-zA-Z0-9\/\-]{5,25}/);
 
     if (matchProtocolo) {
