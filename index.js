@@ -5,13 +5,14 @@ const { google } = require('googleapis');
 const app = express();
 app.use(express.json());
 
-// Credenciais do SeaTalk
+// Credenciais e URLs da API do SeaTalk
 const SEATALK_APP_ID = 'ODU8NjUyODQ4NzE1';
 const SEATALK_APP_SECRET = 'lOt0nyf8fQek0P0LkeTkomA3IYYkiLNe';
 const AUTH_URL = 'https://openapi.seatalk.io/auth/app_access_token';
 const PRIVATE_MSG_URL = 'https://openapi.seatalk.io/messaging/v2/single_chat';
 const GROUP_MSG_URL = 'https://openapi.seatalk.io/messaging/v2/group_chat';
 
+// Planilha Google Sheets
 const SPREADSHEET_ID = '1MMyWOPR6JxAxdo39g7OLawQV72WKXqo0KK6xftdmDuc';
 const SHEET_NAME = 'base_RR';
 
@@ -54,10 +55,16 @@ async function buscarCasoPorProtocolo(protocolo) {
   });
   const rows = res.data.values;
   if (!rows || rows.length === 0) return null;
+  
   const headers = rows[0];
   const idxProtocolo = headers.indexOf('Protocolo');
+  if (idxProtocolo === -1) return null;
+
+  const protoBuscado = String(protocolo).trim().toLowerCase();
+
   for (let i = 1; i < rows.length; i++) {
-    if (rows[i][idxProtocolo] === protocolo) {
+    const valorCelula = String(rows[i][idxProtocolo] || '').trim().toLowerCase();
+    if (valorCelula === protoBuscado) {
       let rowData = {};
       headers.forEach((h, idx) => { rowData[h] = rows[i][idx] || ''; });
       return rowData;
@@ -66,12 +73,13 @@ async function buscarCasoPorProtocolo(protocolo) {
   return null;
 }
 
+// ROTA DO WEBHOOK
 app.all('/seatalk-webhook', async (req, res) => {
   try {
     const body = req.body || {};
     const query = req.query || {};
 
-    // 1. Desafio de Verificação do SeaTalk
+    // 1. Suporte ao Desafio de Verificação do SeaTalk
     const challenge = body.seatalk_challenge || (body.event && body.event.seatalk_challenge) || query.seatalk_challenge;
     if (challenge || body.event_type === 'event_verification') {
       return res.status(200).json({ seatalk_challenge: challenge });
@@ -82,13 +90,15 @@ app.all('/seatalk-webhook', async (req, res) => {
     const eventType = body.event_type;
     const eventData = body.event || {};
     const messageObj = eventData.message || {};
-    const messageText = (messageObj.text && messageObj.text.content) ? messageObj.text.content : '';
+    const messageText = (messageObj.text && messageObj.text.content) ? messageObj.text.content.trim() : '';
 
-    const matchProtocolo = messageText.match(/\b\d+\/\d+\b/);
+    // Regex Misto: captura códigos numéricos longos, mistos com letras, hífen (-) ou barra (/)
+    // Ex: 20260800015860670, 12345/2024, ABC-12345, etc.
+    const matchProtocolo = messageText.match(/[a-zA-Z0-9\/\-]{5,25}/);
 
     if (matchProtocolo) {
       const protocolo = matchProtocolo[0];
-      console.log(`Procurando protocolo: ${protocolo}`);
+      console.log(`Buscando protocolo: ${protocolo}`);
 
       const dadosCaso = await buscarCasoPorProtocolo(protocolo);
       
@@ -132,7 +142,7 @@ app.all('/seatalk-webhook', async (req, res) => {
         console.log('Resposta enviada no chat privado!');
       }
 
-      // RESPONDER EM GRUPO
+      // RESPONDER EM CHAT DE GRUPO
       if (
         eventType === 'new_mentioned_message_received_from_group_chat' ||
         eventType === 'message_from_bot_subscriber_in_group_chat'
@@ -157,7 +167,7 @@ app.all('/seatalk-webhook', async (req, res) => {
 
     return res.status(200).send('OK');
   } catch (error) {
-    console.error('Erro no processamento:', error);
+    console.error('Erro no processamento do webhook:', error);
     return res.status(500).send('Error');
   }
 });
