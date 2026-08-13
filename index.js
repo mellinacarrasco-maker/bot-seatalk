@@ -5,10 +5,11 @@ const { google } = require('googleapis');
 const app = express();
 app.use(express.json());
 
-// Credenciais exatas do seu script de sucesso
+// Credenciais do SeaTalk
 const SEATALK_APP_ID = 'ODU8NjUyODQ4NzE1';
 const SEATALK_APP_SECRET = 'lOt0nyf8fQek0P0LkeTkomA3IYYkiLNe';
 const AUTH_URL = 'https://openapi.seatalk.io/auth/app_access_token';
+const PRIVATE_MSG_URL = 'https://openapi.seatalk.io/messaging/v2/single_chat';
 const GROUP_MSG_URL = 'https://openapi.seatalk.io/messaging/v2/group_chat';
 
 const SPREADSHEET_ID = '1MMyWOPR6JxAxdo39g7OLawQV72WKXqo0KK6xftdmDuc';
@@ -65,51 +66,78 @@ async function buscarCasoPorProtocolo(protocolo) {
   return null;
 }
 
-// ROTA DO WEBHOOK NO RENDER
 app.all('/seatalk-webhook', async (req, res) => {
   try {
     const body = req.body || {};
     const query = req.query || {};
 
-    // 1. Validação de URL / Challenge
+    // 1. Desafio de Verificação do SeaTalk
     const challenge = body.seatalk_challenge || (body.event && body.event.seatalk_challenge) || query.seatalk_challenge;
     if (challenge || body.event_type === 'event_verification') {
       return res.status(200).json({ seatalk_challenge: challenge });
     }
 
-    // Print no log para registrar qualquer evento que o SeaTalk mandar
     console.log('Evento Recebido:', JSON.stringify(body));
 
-    // 2. Leitura das Mensagens
-    const messageObj = (body.event && body.event.message) ? body.event.message : {};
+    const eventType = body.event_type;
+    const eventData = body.event || {};
+    const messageObj = eventData.message || {};
     const messageText = (messageObj.text && messageObj.text.content) ? messageObj.text.content : '';
-    const groupId = messageObj.group_id;
 
     const matchProtocolo = messageText.match(/\b\d+\/\d+\b/);
 
-    if (matchProtocolo && groupId) {
+    if (matchProtocolo) {
       const protocolo = matchProtocolo[0];
-      console.log(`Buscando protocolo: ${protocolo}`);
+      console.log(`Procurando protocolo: ${protocolo}`);
 
       const dadosCaso = await buscarCasoPorProtocolo(protocolo);
+      
+      let textoResposta = '';
       if (dadosCaso) {
         const solicitacaoText = dadosCaso['Solicitação a empresa'] || '';
         const pedeReembolso = solicitacaoText.toLowerCase().includes('reembolso') ? 'SIM' : 'NÃO';
         const statusSistema = formatarStatusReembolso(
           dadosCaso['return_solution'],
           dadosCaso['refund_amount'],
-          dadosCaso['return_refund_refund_paid_datetime']
+          dadosCaso['return_refund_paid_datetime']
         );
 
-        let textoResposta = `• **Protocolo:** ${dadosCaso['Protocolo']}\n`;
+        textoResposta = `• **Protocolo:** ${dadosCaso['Protocolo']}\n`;
         textoResposta += `• **Número do Pedido:** ${dadosCaso['order_sn']}\n`;
         textoResposta += `• **Pede Reembolso?:** ${pedeReembolso}\n`;
         textoResposta += `• **Resumo da Solicitação:** ${solicitacaoText}\n`;
         textoResposta += `• **Status Reembolso Sistema:** ${statusSistema}`;
+      } else {
+        textoResposta = `⚠️ Protocolo **${protocolo}** não foi encontrado na base de dados.`;
+      }
 
-        const token = await getSeaTalkToken();
+      const token = await getSeaTalkToken();
 
-        // Envio no formato Interactive Message (Idêntico ao seu script Apps Script)
+      // RESPONDER EM CHAT PRIVADO (1x1)
+      if (eventType === 'message_from_bot_subscriber') {
+        const seatalkId = eventData.seatalk_id;
+        await axios.post(
+          PRIVATE_MSG_URL,
+          {
+            seatalk_id: seatalkId,
+            message: {
+              tag: 'interactive_message',
+              interactive_message: {
+                elements: [{ element_type: 'description', description: { format: 1, text: textoResposta } }]
+              }
+            }
+          },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        console.log('Resposta enviada no chat privado!');
+      }
+
+      // RESPONDER EM GRUPO
+      if (
+        eventType === 'new_mentioned_message_received_from_group_chat' ||
+        eventType === 'message_from_bot_subscriber_in_group_chat'
+      ) {
+        const groupId = messageObj.group_id;
         await axios.post(
           GROUP_MSG_URL,
           {
@@ -123,14 +151,13 @@ app.all('/seatalk-webhook', async (req, res) => {
           },
           { headers: { Authorization: `Bearer ${token}` } }
         );
-
-        console.log('Mensagem respondida no grupo com sucesso!');
+        console.log('Resposta enviada no chat de grupo!');
       }
     }
 
     return res.status(200).send('OK');
   } catch (error) {
-    console.error('Erro no Webhook:', error);
+    console.error('Erro no processamento:', error);
     return res.status(500).send('Error');
   }
 });
