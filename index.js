@@ -5,7 +5,7 @@ const { google } = require('googleapis');
 const app = express();
 app.use(express.json());
 
-// Credenciais da API do SeaTalk (CORRIGIDAS)
+// Credenciais da API do SeaTalk
 const SEATALK_APP_ID = 'ODU4NjUyODQ4NzE1';
 const SEATALK_APP_SECRET = 'lOt0nyf8fQek0P0LkeTkomA3IYYkiLNe';
 const AUTH_URL = 'https://openapi.seatalk.io/auth/app_access_token';
@@ -90,9 +90,12 @@ app.all('/seatalk-webhook', async (req, res) => {
     const eventType = body.event_type;
     const eventData = body.event || {};
     const messageObj = eventData.message || {};
-    const messageText = (messageObj.text && messageObj.text.content) ? messageObj.text.content.trim() : '';
+    
+    // Captura 'plain_text' (que o grupo envia) ou 'content' (do privado)
+    const textObj = messageObj.text || {};
+    const messageText = (textObj.plain_text || textObj.content || '').trim();
 
-    // Aceita qualquer formato de protocolo (numeros longos, com barra /, com hífen -, etc)
+    // Extrai o protocolo misto da mensagem
     const matchProtocolo = messageText.match(/[a-zA-Z0-9\/\-]{5,25}/);
 
     if (matchProtocolo) {
@@ -160,7 +163,7 @@ app.all('/seatalk-webhook', async (req, res) => {
           },
           { headers: { Authorization: `Bearer ${token}` } }
         );
-        console.log('Resposta enviada no chat de grupo!');
+        console.log('Resposta enviada no chat de grupo com sucesso!');
       }
     }
 
